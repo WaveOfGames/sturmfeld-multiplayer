@@ -42,6 +42,13 @@ function sendToIds(ids, type, data = {}) {
     if (c) send(c.ws, type, data);
   }
 }
+function broadcastTeamRoster(teamId) {
+  if (!teamId) return;
+  const members = [...clients.values()]
+    .filter(c => c.teamId === teamId && c.status !== 'new')
+    .map(c => ({ id: c.id, name: c.name, look: c.look || 0, status: c.status, alive: c.lastState ? c.lastState.alive !== false : true }));
+  for (const c of clients.values()) if (c.teamId === teamId) send(c.ws, 'teamRoster', { members });
+}
 function broadcastLobby() {
   const snapshot = {
     waiting: waiting.length,
@@ -153,6 +160,7 @@ function removeClient(id) {
       finishMatch();
     }
   }
+  broadcastTeamRoster(c.teamId);
   broadcastLobby();
 }
 
@@ -171,6 +179,7 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       const name = String(msg.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
       client.name = name || 'Spieler';
+      client.look = Math.max(0, Math.min(30, Math.floor(Number(msg.look) || 0)));
       const requestedTeam = String(msg.teamCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
       if (requestedTeam) {
         const members = [...clients.values()].filter(c => c.id !== id && c.teamId === requestedTeam && c.status !== 'new');
@@ -184,6 +193,7 @@ wss.on('connection', ws => {
       }
       client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
       if (client.status === 'new') queueClient(id);
+      broadcastTeamRoster(client.teamId);
       return;
     }
 
@@ -202,8 +212,18 @@ wss.on('connection', ws => {
       state.hp = Math.max(0, Math.min(100, Number(p.hp) || 0));
       state.shield = Math.max(0, Math.min(100, Number(p.shield) || 0));
       state.name = client.name;
+      state.look = client.look || 0;
       state.teamId = client.teamId || id;
+      const wasAlive = !client.lastState || client.lastState.alive !== false;
       client.lastState = state;
+      if (wasAlive && !state.alive) {
+        for (const mate of clients.values()) {
+          if (mate.id !== id && mate.teamId === client.teamId && mate.matchId === currentMatch.id) {
+            send(mate.ws, 'teamMateDead', { id, name: client.name });
+          }
+        }
+        broadcastTeamRoster(client.teamId);
+      }
       for (const otherId of currentMatch.players) {
         if (otherId === id) continue;
         const other = clients.get(otherId);
