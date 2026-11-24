@@ -219,6 +219,34 @@ wss.on('connection', ws => {
       return;
     }
 
+    if (msg.type === 'botSnapshot') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] !== id) return;
+      const bots = Array.isArray(msg.bots) ? msg.bots.slice(0, 50).map(b => {
+        const q = {};
+        for (const k of ['i','x','y','z','yaw','hp','shield','mag']) {
+          const n = Number(b[k]);
+          if (!Number.isFinite(n)) return null;
+          q[k] = Math.max(-10000, Math.min(10000, n));
+        }
+        q.alive = !!b.alive;
+        return q;
+      }).filter(Boolean) : [];
+      sendToIds(currentMatch.players.filter(x => x !== id), 'botSnapshot', { bots });
+      return;
+    }
+
+    if (msg.type === 'botHit') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] === id) return;
+      const host = clients.get(currentMatch.players[0]);
+      if (host) send(host.ws, 'botHit', {
+        fromId: id,
+        botIndex: Math.max(0, Math.min(50, Math.floor(Number(msg.botIndex) || 0))),
+        amount: Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1))),
+        head: !!msg.head
+      });
+      return;
+    }
+
     if (msg.type === 'roundEnd') {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
       currentMatch.ended.add(id);
