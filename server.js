@@ -107,6 +107,9 @@ function startMatch() {
     mapIndex: clients.get(picked[0])?.mapIndex || 0,
     players: picked,
     ended: new Set(),
+    openedChests: new Set(),
+    aliveBots: null,
+    winnerTeamId: null,
     startedAt: Date.now()
   };
   for (const id of picked) {
@@ -140,6 +143,29 @@ function finishMatch() {
   }
   currentMatch = null;
   broadcastLobby();
+}
+function cleanLoot(input) {
+  if (!Array.isArray(input)) return [];
+  const allowed = new Set(['weapon','ammo','medkit','shield','speed']);
+  return input.slice(0, 24).filter(x => x && allowed.has(x[0])).map(x => {
+    const d = x[1] && typeof x[1] === 'object' ? x[1] : {};
+    if (x[0] === 'weapon') return ['weapon', { w: ['pistol','smg','ar','shotgun','sniper'].includes(d.w) ? d.w : 'pistol', r: Math.max(0, Math.min(5, Math.floor(Number(d.r)||0))) }];
+    if (x[0] === 'ammo') return ['ammo', { t: ['light','shell','heavy'].includes(d.t) ? d.t : 'light', n: Math.max(1, Math.min(100, Math.floor(Number(d.n)||1))) }];
+    return [x[0], {}];
+  });
+}
+function evaluateWinner() {
+  if (!currentMatch || currentMatch.winnerTeamId || currentMatch.aliveBots !== 0) return;
+  const aliveTeams = new Set();
+  for (const id of currentMatch.players) {
+    const c = clients.get(id);
+    if (c && c.lastState && c.lastState.alive) aliveTeams.add(c.teamId || id);
+  }
+  if (aliveTeams.size === 1) {
+    const teamId = [...aliveTeams][0];
+    currentMatch.winnerTeamId = teamId;
+    sendToIds(currentMatch.players, 'teamWon', { teamId });
+  }
 }
 function removeFromWaiting(id) {
   waiting = waiting.filter(x => x !== id);
@@ -228,6 +254,7 @@ wss.on('connection', ws => {
         }
         broadcastTeamRoster(client.teamId);
       }
+      evaluateWinner();
       for (const otherId of currentMatch.players) {
         if (otherId === id) continue;
         const other = clients.get(otherId);
@@ -248,6 +275,23 @@ wss.on('connection', ws => {
       const amount = Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1)));
       const target = clients.get(targetId);
       if (target) send(target.ws, 'playerHit', { targetId, fromId: id, fromName: client.name, amount, head: !!msg.head });
+      return;
+    }
+
+    if (msg.type === 'chestOpen') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      const chestId = Math.max(0, Math.min(500, Math.floor(Number(msg.chestId))));
+      if (currentMatch.openedChests.has(chestId)) return;
+      currentMatch.openedChests.add(chestId);
+      sendToIds(currentMatch.players, 'chestOpened', { chestId, loot: cleanLoot(msg.loot) });
+      return;
+    }
+
+    if (msg.type === 'lootSpawn') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] !== id) return;
+      const x = Number(msg.x), z = Number(msg.z), rot = Number(msg.rot);
+      if (![x,z,rot].every(Number.isFinite)) return;
+      sendToIds(currentMatch.players, 'lootSpawn', { x: Math.max(-1000,Math.min(1000,x)), z: Math.max(-1000,Math.min(1000,z)), rot, loot: cleanLoot(msg.loot), boss: !!msg.boss });
       return;
     }
 
@@ -285,7 +329,9 @@ wss.on('connection', ws => {
         q.alive = !!b.alive;
         return q;
       }).filter(Boolean) : [];
+      currentMatch.aliveBots = bots.filter(b => b.alive).length;
       sendToIds(currentMatch.players.filter(x => x !== id), 'botSnapshot', { bots });
+      evaluateWinner();
       return;
     }
 
