@@ -132,18 +132,14 @@ function finishMatch() {
   if (!currentMatch) return;
   const finished = currentMatch;
   sendToIds(finished.players, 'matchEnd', { matchId: finished.id, round: finished.round });
-  // Spieler aus der alten Runde kommen hinter bereits wartende Spieler.
-  const returning = finished.players.filter(id => clients.has(id));
-  for (const id of returning) {
+  // Nach der Runde bleiben Spieler im Ergebnisbildschirm. Sie treten erst auf
+  // eigenen Wunsch wieder der Warteschlange bei.
+  for (const id of finished.players) {
     const c = clients.get(id);
-    c.status = 'waiting';
-    c.matchId = null;
-    c.lastState = null;
+    if (c) { c.status = 'finished'; c.matchId = null; c.lastState = null; }
   }
   currentMatch = null;
-  waiting = [...waiting, ...returning.filter(id => !waiting.includes(id))];
   broadcastLobby();
-  if (waiting.length) setTimeout(scheduleStart, 8000);
 }
 function removeFromWaiting(id) {
   waiting = waiting.filter(x => x !== id);
@@ -178,6 +174,11 @@ wss.on('connection', ws => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg.type !== 'string') return;
+
+    if (msg.type === 'requeue') {
+      if (!currentMatch && client.status === 'finished') queueClient(id);
+      return;
+    }
 
     if (msg.type === 'join') {
       const name = String(msg.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
