@@ -279,6 +279,10 @@ wss.on('connection', ws => {
 
     if (msg.type === 'roundEnd') {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      const winnerTeamId = String(msg.winnerTeamId || '');
+      if (winnerTeamId && winnerTeamId === client.teamId && client.lastState && client.lastState.alive) {
+        sendToIds(currentMatch.players, 'teamWon', { teamId: winnerTeamId });
+      }
       currentMatch.ended.add(id);
       send(ws, 'roundEndReceived', { waitingFor: currentMatch.players.length - currentMatch.ended.size });
       if (currentMatch.ended.size >= currentMatch.players.length) finishMatch();
