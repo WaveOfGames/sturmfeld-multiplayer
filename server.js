@@ -108,7 +108,7 @@ function startMatch() {
     players: picked,
     ended: new Set(),
     openedChests: new Set(),
-    pickups: new Set(),
+    takenPickups: new Set(),
     aliveBots: null,
     winnerTeamId: null,
     startedAt: Date.now()
@@ -286,7 +286,6 @@ wss.on('connection', ws => {
       currentMatch.openedChests.add(chestId);
       const loot = cleanLoot(msg.loot);
       const pickupPrefix = 'chest-' + chestId;
-      loot.forEach((_, i) => currentMatch.pickups.add(pickupPrefix + ':' + i));
       sendToIds(currentMatch.players, 'chestOpened', { chestId, loot, pickupPrefix });
       return;
     }
@@ -297,7 +296,6 @@ wss.on('connection', ws => {
       if (![x,z,rot].every(Number.isFinite)) return;
       const loot = cleanLoot(msg.loot);
       const spawnId = randomUUID();
-      loot.forEach((_, i) => currentMatch.pickups.add(spawnId + ':' + i));
       sendToIds(currentMatch.players, 'lootSpawn', { x: Math.max(-1000,Math.min(1000,x)), z: Math.max(-1000,Math.min(1000,z)), rot, loot, boss: !!msg.boss, spawnId });
       return;
     }
@@ -305,8 +303,8 @@ wss.on('connection', ws => {
     if (msg.type === 'pickupTake') {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
       const pickupId = String(msg.pickupId || '').slice(0, 100);
-      if (!pickupId || !currentMatch.pickups.has(pickupId)) return;
-      currentMatch.pickups.delete(pickupId);
+      if (!pickupId || currentMatch.takenPickups.has(pickupId)) return;
+      currentMatch.takenPickups.add(pickupId);
       sendToIds(currentMatch.players, 'pickupTaken', { pickupId, playerId: id });
       return;
     }
