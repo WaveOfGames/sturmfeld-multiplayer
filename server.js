@@ -155,7 +155,10 @@ function removeClient(id) {
   clients.delete(id);
   if (currentMatch && currentMatch.players.includes(id)) {
     currentMatch.players = currentMatch.players.filter(x => x !== id);
-    sendToIds(currentMatch.players, 'playerLeft', { id });
+    sendToIds(currentMatch.players, 'playerLeft', { id, name: c.name, teamId: c.teamId || id });
+    for (const mate of clients.values()) {
+      if (mate.teamId === c.teamId && mate.matchId === currentMatch.id) send(mate.ws, 'teamMateLeft', { id, name: c.name });
+    }
     if (currentMatch.players.length === 0 || currentMatch.ended.size >= currentMatch.players.length) {
       finishMatch();
     }
