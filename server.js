@@ -74,7 +74,23 @@ function scheduleStart() {
 function startMatch() {
   if (countdown) clearTimeout(countdown);
   countdown = null;
-  const picked = waiting.splice(0, MAX_PLAYERS).filter(id => clients.has(id));
+  // Ganze Teams gemeinsam einteilen; ein Team wird niemals auf zwei Runden verteilt.
+  const groups = new Map();
+  for (const id of waiting) {
+    const c = clients.get(id);
+    if (!c) continue;
+    const key = c.teamId || id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(id);
+  }
+  const picked = [];
+  const pickedSet = new Set();
+  for (const group of groups.values()) {
+    if (picked.length + group.length <= MAX_PLAYERS) {
+      for (const id of group) { picked.push(id); pickedSet.add(id); }
+    }
+  }
+  waiting = waiting.filter(id => !pickedSet.has(id));
   if (!picked.length) { broadcastLobby(); return; }
   roundNumber += 1;
   currentMatch = {
@@ -92,7 +108,7 @@ function startMatch() {
     c.matchId = currentMatch.id;
     c.lastState = null;
   }
-  const roster = picked.map(id => ({ id, name: clients.get(id)?.name || 'Spieler' }));
+  const roster = picked.map(id => ({ id, name: clients.get(id)?.name || 'Spieler', teamId: clients.get(id)?.teamId || id }));
   sendToIds(picked, 'matchStart', {
     matchId: currentMatch.id,
     round: currentMatch.round,
@@ -155,6 +171,17 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       const name = String(msg.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
       client.name = name || 'Spieler';
+      const requestedTeam = String(msg.teamCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+      if (requestedTeam) {
+        const members = [...clients.values()].filter(c => c.id !== id && c.teamId === requestedTeam && c.status !== 'new');
+        if (members.length >= 3) {
+          send(ws, 'teamError', { message: 'Dieses Team ist bereits voll (maximal 4 Spieler).' });
+          return;
+        }
+        client.teamId = requestedTeam;
+      } else {
+        client.teamId = id; // Ohne Code spielt man in einem eigenen Team.
+      }
       client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
       if (client.status === 'new') queueClient(id);
       return;
@@ -175,6 +202,7 @@ wss.on('connection', ws => {
       state.hp = Math.max(0, Math.min(100, Number(p.hp) || 0));
       state.shield = Math.max(0, Math.min(100, Number(p.shield) || 0));
       state.name = client.name;
+      state.teamId = client.teamId || id;
       client.lastState = state;
       for (const otherId of currentMatch.players) {
         if (otherId === id) continue;
@@ -188,6 +216,8 @@ wss.on('connection', ws => {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
       const targetId = String(msg.targetId || '');
       if (!currentMatch.players.includes(targetId) || targetId === id) return;
+      const targetClient = clients.get(targetId);
+      if (targetClient && targetClient.teamId && targetClient.teamId === client.teamId) return; // Kein Friendly Fire
       const now = Date.now();
       if (now - client.hitWindow > 1000) { client.hitWindow = now; client.hitCount = 0; }
       if (++client.hitCount > 40) return;
