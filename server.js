@@ -108,6 +108,7 @@ function startMatch() {
     players: picked,
     ended: new Set(),
     openedChests: new Set(),
+    pickups: new Set(),
     aliveBots: null,
     winnerTeamId: null,
     startedAt: Date.now()
@@ -283,7 +284,10 @@ wss.on('connection', ws => {
       const chestId = Math.max(0, Math.min(500, Math.floor(Number(msg.chestId))));
       if (currentMatch.openedChests.has(chestId)) return;
       currentMatch.openedChests.add(chestId);
-      sendToIds(currentMatch.players, 'chestOpened', { chestId, loot: cleanLoot(msg.loot) });
+      const loot = cleanLoot(msg.loot);
+      const pickupPrefix = 'chest-' + chestId;
+      loot.forEach((_, i) => currentMatch.pickups.add(pickupPrefix + ':' + i));
+      sendToIds(currentMatch.players, 'chestOpened', { chestId, loot, pickupPrefix });
       return;
     }
 
@@ -291,7 +295,19 @@ wss.on('connection', ws => {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] !== id) return;
       const x = Number(msg.x), z = Number(msg.z), rot = Number(msg.rot);
       if (![x,z,rot].every(Number.isFinite)) return;
-      sendToIds(currentMatch.players, 'lootSpawn', { x: Math.max(-1000,Math.min(1000,x)), z: Math.max(-1000,Math.min(1000,z)), rot, loot: cleanLoot(msg.loot), boss: !!msg.boss });
+      const loot = cleanLoot(msg.loot);
+      const spawnId = randomUUID();
+      loot.forEach((_, i) => currentMatch.pickups.add(spawnId + ':' + i));
+      sendToIds(currentMatch.players, 'lootSpawn', { x: Math.max(-1000,Math.min(1000,x)), z: Math.max(-1000,Math.min(1000,z)), rot, loot, boss: !!msg.boss, spawnId });
+      return;
+    }
+
+    if (msg.type === 'pickupTake') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      const pickupId = String(msg.pickupId || '').slice(0, 100);
+      if (!pickupId || !currentMatch.pickups.has(pickupId)) return;
+      currentMatch.pickups.delete(pickupId);
+      sendToIds(currentMatch.players, 'pickupTaken', { pickupId, playerId: id });
       return;
     }
 
@@ -342,7 +358,9 @@ wss.on('connection', ws => {
         fromId: id,
         botIndex: Math.max(0, Math.min(50, Math.floor(Number(msg.botIndex) || 0))),
         amount: Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1))),
-        head: !!msg.head
+        head: !!msg.head,
+        fromName: client.name,
+        teamId: client.teamId || id
       });
       return;
     }
