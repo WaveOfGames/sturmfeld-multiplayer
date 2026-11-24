@@ -174,7 +174,7 @@ wss.on('connection', ws => {
       const requestedTeam = String(msg.teamCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
       if (requestedTeam) {
         const members = [...clients.values()].filter(c => c.id !== id && c.teamId === requestedTeam && c.status !== 'new');
-        if (members.length >= 3) {
+        if (members.length >= 4) {
           send(ws, 'teamError', { message: 'Dieses Team ist bereits voll (maximal 4 Spieler).' });
           return;
         }
