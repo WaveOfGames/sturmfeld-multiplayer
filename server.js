@@ -2,7 +2,7 @@
 
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
-const { randomUUID } = require('crypto');
+const { randomUUID, randomInt } = require('crypto');
 
 const PORT = Number(process.env.PORT || 10000);
 const MAX_PLAYERS = 50;
@@ -80,6 +80,8 @@ function startMatch() {
   currentMatch = {
     id: randomUUID(),
     round: roundNumber,
+    seed: randomInt(1, 0x7fffffff),
+    mapIndex: clients.get(picked[0])?.mapIndex || 0,
     players: picked,
     ended: new Set(),
     startedAt: Date.now()
@@ -96,7 +98,9 @@ function startMatch() {
     round: currentMatch.round,
     players: roster,
     humanPlayers: picked.length,
-    botsToFill: MAX_PLAYERS - picked.length
+    botsToFill: MAX_PLAYERS - picked.length,
+    seed: currentMatch.seed,
+    mapIndex: currentMatch.mapIndex
   });
   // Spieler, die währenddessen warten, bleiben für die nächste Runde in der Warteschlange.
   broadcastLobby();
@@ -138,7 +142,7 @@ function removeClient(id) {
 
 wss.on('connection', ws => {
   const id = randomUUID();
-  const client = { id, ws, name: 'Spieler', status: 'new', matchId: null, lastState: null };
+  const client = { id, ws, name: 'Spieler', status: 'new', matchId: null, lastState: null, mapIndex: 0, hitWindow: 0, hitCount: 0, lastStormAt: 0 };
   clients.set(id, client);
   send(ws, 'welcome', { id, maxPlayers: MAX_PLAYERS, countdownSeconds: COUNTDOWN_SECONDS });
   broadcastLobby();
@@ -151,6 +155,7 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       const name = String(msg.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
       client.name = name || 'Spieler';
+      client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
       if (client.status === 'new') queueClient(id);
       return;
     }
@@ -167,6 +172,8 @@ wss.on('connection', ws => {
       state.phase = String(p.phase || 'ground').slice(0, 12);
       state.look = Math.max(0, Math.min(30, Math.floor(Number(p.look) || 0)));
       state.alive = p.alive !== false;
+      state.hp = Math.max(0, Math.min(100, Number(p.hp) || 0));
+      state.shield = Math.max(0, Math.min(100, Number(p.shield) || 0));
       state.name = client.name;
       client.lastState = state;
       for (const otherId of currentMatch.players) {
@@ -174,6 +181,41 @@ wss.on('connection', ws => {
         const other = clients.get(otherId);
         if (other) send(other.ws, 'playerState', { id, state });
       }
+      return;
+    }
+
+    if (msg.type === 'playerHit') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      const targetId = String(msg.targetId || '');
+      if (!currentMatch.players.includes(targetId) || targetId === id) return;
+      const now = Date.now();
+      if (now - client.hitWindow > 1000) { client.hitWindow = now; client.hitCount = 0; }
+      if (++client.hitCount > 40) return;
+      const amount = Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1)));
+      const target = clients.get(targetId);
+      if (target) send(target.ws, 'playerHit', { targetId, fromId: id, fromName: client.name, amount, head: !!msg.head });
+      return;
+    }
+
+    if (msg.type === 'stormState') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] !== id) return;
+      const now = Date.now();
+      if (now - client.lastStormAt < 100) return;
+      client.lastStormAt = now;
+      const p = msg.storm || {};
+      const storm = {};
+      for (const k of ['r','cx','cz','phase','t','r0','r1','tick']) {
+        const n = Number(p[k]);
+        if (!Number.isFinite(n)) return;
+        storm[k] = Math.max(-10000, Math.min(10000, n));
+      }
+      storm.state = p.state === 'shrink' ? 'shrink' : 'wait';
+      storm.done = !!p.done;
+      for (const k of ['c0','c1']) {
+        if (!p[k] || !Number.isFinite(Number(p[k].x)) || !Number.isFinite(Number(p[k].z))) return;
+        storm[k] = { x: Number(p[k].x), z: Number(p[k].z) };
+      }
+      sendToIds(currentMatch.players.filter(x => x !== id), 'stormState', { storm });
       return;
     }
 
