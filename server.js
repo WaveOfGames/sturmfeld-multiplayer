@@ -113,6 +113,8 @@ function startMatch() {
     openedChests: new Set(),
     takenPickups: new Set(),
     aliveBots: null,
+    lastBotSnapshot: null,
+    lastStormState: null,
     winnerTeamId: null,
     startedAt: Date.now()
   };
@@ -352,6 +354,7 @@ wss.on('connection', ws => {
         if (!p[k] || !Number.isFinite(Number(p[k].x)) || !Number.isFinite(Number(p[k].z))) return;
         storm[k] = { x: Number(p[k].x), z: Number(p[k].z) };
       }
+      currentMatch.lastStormState = storm;
       sendToIds(currentMatch.players.filter(x => x !== id), 'stormState', { storm });
       return;
     }
@@ -369,6 +372,7 @@ wss.on('connection', ws => {
         return q;
       }).filter(Boolean) : [];
       currentMatch.aliveBots = bots.filter(b => b.alive).length;
+      currentMatch.lastBotSnapshot = { bots };
       sendToIds(currentMatch.players.filter(x => x !== id), 'botSnapshot', { bots });
       evaluateWinner();
       return;
@@ -409,6 +413,8 @@ wss.on('connection', ws => {
         if (other && other.lastState) snapshot.push({ id: otherId, state: other.lastState });
       }
       send(ws, 'snapshot', { players: snapshot });
+      if (currentMatch.lastBotSnapshot) send(ws, 'botSnapshot', currentMatch.lastBotSnapshot);
+      if (currentMatch.lastStormState) send(ws, 'stormState', { storm: currentMatch.lastStormState });
     }
   });
 
