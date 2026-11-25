@@ -226,7 +226,7 @@ wss.on('connection', ws => {
         client.teamId = id; // Ohne Code spielt man in einem eigenen Team.
       }
       client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
-      if (msg.type === 'join' && client.status === 'new') queueClient(id);
+      if (msg.type === 'join' && (client.status === 'new' || client.status === 'teamLobby')) queueClient(id);
       else if (msg.type === 'teamJoin' && client.status === 'new') client.status = 'teamLobby';
       broadcastTeamRoster(client.teamId);
       return;
