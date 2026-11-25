@@ -81,7 +81,6 @@ function scheduleStart() {
 function startMatch() {
   if (countdown) clearTimeout(countdown);
   countdown = null;
-  // Ganze Teams gemeinsam einteilen; ein Team wird niemals auf zwei Runden verteilt.
   const groups = new Map();
   for (const id of waiting) {
     const c = clients.get(id);
@@ -90,52 +89,48 @@ function startMatch() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(id);
   }
+  const first = waiting.map(id => clients.get(id)).find(Boolean);
+  const duelQueue = !!(first && first.mapIndex === 5);
   const picked = [];
   const pickedSet = new Set();
   for (const group of groups.values()) {
-    if (picked.length + group.length <= MAX_PLAYERS) {
-      for (const id of group) { picked.push(id); pickedSet.add(id); }
+    const allDuel = group.length > 0 && group.every(id => clients.get(id)?.mapIndex === 5);
+    if (duelQueue) {
+      if (allDuel && group.length === 2) {
+        picked.push(...group); group.forEach(id => pickedSet.add(id)); break;
+      }
+    } else if (!allDuel && picked.length + group.length <= MAX_PLAYERS) {
+      picked.push(...group); group.forEach(id => pickedSet.add(id));
     }
   }
   waiting = waiting.filter(id => !pickedSet.has(id));
-  if (!picked.length) { broadcastLobby(); return; }
+  if (!picked.length) {
+    broadcastLobby();
+    if (waiting.length) scheduleStart();
+    return;
+  }
+  const isDuel = duelQueue;
   roundNumber += 1;
-  // Eine zufällige Karte aus allen Karten wählen, die die Spieler dieser Runde ausgewählt haben.
   const selectedMaps = [...new Set(picked.map(id => clients.get(id)?.mapIndex).filter(n => Number.isInteger(n) && n >= 0 && n <= 4))];
-  const chosenMapIndex = selectedMaps.length ? selectedMaps[randomInt(0, selectedMaps.length)] : 0;
+  const chosenMapIndex = isDuel ? 5 : (selectedMaps.length ? selectedMaps[randomInt(0, selectedMaps.length)] : 0);
   currentMatch = {
-    id: randomUUID(),
-    round: roundNumber,
-    seed: randomInt(1, 0x7fffffff),
-    mapIndex: chosenMapIndex,
-    players: picked,
-    ended: new Set(),
-    openedChests: new Set(),
-    takenPickups: new Set(),
-    aliveBots: null,
-    lastBotSnapshot: null,
-    lastStormState: null,
-    winnerTeamId: null,
-    startedAt: Date.now()
+    id: randomUUID(), round: roundNumber, seed: randomInt(1, 0x7fffffff),
+    mapIndex: chosenMapIndex, duel: isDuel, players: picked, ended: new Set(),
+    openedChests: new Set(), takenPickups: new Set(), aliveBots: isDuel ? 0 : null,
+    lastBotSnapshot: null, lastStormState: null, winnerTeamId: null, startedAt: Date.now()
   };
   for (const id of picked) {
     const c = clients.get(id);
-    c.status = 'playing';
-    c.matchId = currentMatch.id;
-    c.lastState = null;
+    c.status = 'playing'; c.matchId = currentMatch.id; c.lastState = null; c.lastHitBy = null;
   }
-  const roster = picked.map(id => ({ id, name: clients.get(id)?.name || 'Spieler', teamId: clients.get(id)?.teamId || id }));
+  const roster = picked.map(id => ({ id, name: clients.get(id)?.name || 'Spieler', teamId: isDuel ? id : (clients.get(id)?.teamId || id) }));
   sendToIds(picked, 'matchStart', {
-    matchId: currentMatch.id,
-    round: currentMatch.round,
-    players: roster,
-    humanPlayers: picked.length,
-    botsToFill: MAX_PLAYERS - picked.length,
-    seed: currentMatch.seed,
-    mapIndex: currentMatch.mapIndex
+    matchId: currentMatch.id, round: currentMatch.round, players: roster,
+    humanPlayers: picked.length, botsToFill: isDuel ? 0 : MAX_PLAYERS - picked.length,
+    seed: currentMatch.seed, mapIndex: currentMatch.mapIndex, duel: isDuel
   });
-  // Spieler, die währenddessen warten, bleiben für die nächste Runde in der Warteschlange.
   broadcastLobby();
+  if (waiting.length) scheduleStart();
 }
 function finishMatch() {
   if (!currentMatch) return;
@@ -165,7 +160,7 @@ function evaluateWinner() {
   const aliveTeams = new Set();
   for (const id of currentMatch.players) {
     const c = clients.get(id);
-    if (c && c.lastState && c.lastState.alive) aliveTeams.add(c.teamId || id);
+    if (c && c.lastState && c.lastState.alive) aliveTeams.add(currentMatch.duel ? id : (c.teamId || id));
   }
   if (aliveTeams.size === 1) {
     const teamId = [...aliveTeams][0];
@@ -227,7 +222,7 @@ wss.on('connection', ws => {
       } else {
         client.teamId = id; // Ohne Code spielt man in einem eigenen Team.
       }
-      client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
+      client.mapIndex = Math.max(0, Math.min(5, Math.floor(Number(msg.mapIndex) || 0)));
       if (msg.type === 'join' && (client.status === 'new' || client.status === 'teamLobby')) queueClient(id);
       else if (msg.type === 'teamJoin' && client.status === 'new') client.status = 'teamLobby';
       broadcastTeamRoster(client.teamId);
@@ -250,7 +245,7 @@ wss.on('connection', ws => {
       state.shield = Math.max(0, Math.min(100, Number(p.shield) || 0));
       state.name = client.name;
       state.look = client.look || 0;
-      state.teamId = client.teamId || id;
+      state.teamId = currentMatch.duel ? id : (client.teamId || id);
       const wasAlive = !client.lastState || client.lastState.alive !== false;
       client.lastState = state;
       if (wasAlive && !state.alive) {
@@ -275,7 +270,7 @@ wss.on('connection', ws => {
       const targetId = String(msg.targetId || '');
       if (!currentMatch.players.includes(targetId) || targetId === id) return;
       const targetClient = clients.get(targetId);
-      if (targetClient && targetClient.teamId && targetClient.teamId === client.teamId) return; // Kein Friendly Fire
+      if (!currentMatch.duel && targetClient && targetClient.teamId && targetClient.teamId === client.teamId) return; // Kein Friendly Fire außerhalb des Duells
       const now = Date.now();
       if (now - client.hitWindow > 1000) { client.hitWindow = now; client.hitCount = 0; }
       if (++client.hitCount > 40) return;
