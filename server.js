@@ -178,7 +178,12 @@ function removeClient(id) {
   removeFromWaiting(id);
   clients.delete(id);
   if (currentMatch && currentMatch.players.includes(id)) {
+    const wasHost = currentMatch.players[0] === id;
     currentMatch.players = currentMatch.players.filter(x => x !== id);
+    if (wasHost && currentMatch.players.length) {
+      // Der nächste Spieler übernimmt Bot-KI, Sturm und Snapshot-Synchronisierung.
+      sendToIds(currentMatch.players, 'hostChanged', { hostId: currentMatch.players[0] });
+    }
     sendToIds(currentMatch.players, 'playerLeft', { id, name: c.name, teamId: c.teamId || id });
     for (const mate of clients.values()) {
       if (mate.teamId === c.teamId && mate.matchId === currentMatch.id) send(mate.ws, 'teamMateLeft', { id, name: c.name });
@@ -281,6 +286,15 @@ wss.on('connection', ws => {
       const amount = Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1)));
       const target = clients.get(targetId);
       if (target) { target.lastHitBy = id; send(target.ws, 'playerHit', { targetId, fromId: id, fromName: client.name, amount, head: !!msg.head }); }
+      return;
+    }
+
+    if (msg.type === 'killAward') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id || currentMatch.players[0] !== id) return;
+      const killerId = String(msg.killerId || '');
+      if (!currentMatch.players.includes(killerId) || killerId === id) return;
+      const killer = clients.get(killerId);
+      if (killer) send(killer.ws, 'killAward', { killerId });
       return;
     }
 
