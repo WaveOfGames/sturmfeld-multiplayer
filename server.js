@@ -210,8 +210,8 @@ wss.on('connection', ws => {
       return;
     }
 
-    if (msg.type === 'join') {
-      const name = String(msg.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
+    if (msg.type === 'teamJoin' || msg.type === 'join') {
+      const name = String(msg.name || client.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
       client.name = name || 'Spieler';
       client.look = Math.max(0, Math.min(30, Math.floor(Number(msg.look) || 0)));
       const requestedTeam = String(msg.teamCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
@@ -226,7 +226,8 @@ wss.on('connection', ws => {
         client.teamId = id; // Ohne Code spielt man in einem eigenen Team.
       }
       client.mapIndex = Math.max(0, Math.min(4, Math.floor(Number(msg.mapIndex) || 0)));
-      if (client.status === 'new') queueClient(id);
+      if (msg.type === 'join' && client.status === 'new') queueClient(id);
+      else if (msg.type === 'teamJoin' && client.status === 'new') client.status = 'teamLobby';
       broadcastTeamRoster(client.teamId);
       return;
     }
