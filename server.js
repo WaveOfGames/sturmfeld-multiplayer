@@ -113,8 +113,8 @@ function startMatch() {
   }
   waiting = waiting.filter(id => !pickedSet.has(id));
   if (!picked.length) {
+    // Auf ein passendes Team warten; der nächste Queue-Beitritt startet den Countdown erneut.
     broadcastLobby();
-    if (waiting.length) scheduleStart();
     return;
   }
   const isDuel = picked.length === 2 && picked.every(id => clients.get(id)?.mapIndex === 5);
