@@ -300,6 +300,27 @@ wss.on('connection', ws => {
       return;
     }
 
+    if (msg.type === 'teamMarkerSet') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      const x = Number(msg.x), z = Number(msg.z);
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+      const marker = { ownerId: id, name: client.name, x: Math.max(-10000,Math.min(10000,x)), z: Math.max(-10000,Math.min(10000,z)) };
+      for (const mateId of currentMatch.players) {
+        const mate = clients.get(mateId);
+        if (mate && mateId !== id && mate.teamId === client.teamId) send(mate.ws, 'teamMarkerSet', marker);
+      }
+      return;
+    }
+
+    if (msg.type === 'teamMarkerRemove') {
+      if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
+      for (const mateId of currentMatch.players) {
+        const mate = clients.get(mateId);
+        if (mate && mateId !== id && mate.teamId === client.teamId) send(mate.ws, 'teamMarkerRemove', { ownerId: id });
+      }
+      return;
+    }
+
     if (msg.type === 'pickupTake') {
       if (!currentMatch || client.status !== 'playing' || client.matchId !== currentMatch.id) return;
       const pickupId = String(msg.pickupId || '').slice(0, 100);
