@@ -212,18 +212,20 @@ wss.on('connection', ws => {
       const name = String(msg.name || client.name || 'Spieler').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, 14);
       client.name = name || 'Spieler';
       client.look = Math.max(0, Math.min(30, Math.floor(Number(msg.look) || 0)));
+      client.mapIndex = Math.max(0, Math.min(5, Math.floor(Number(msg.mapIndex) || 0)));
       const requestedTeam = String(msg.teamCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+      if (client.mapIndex === 5 && !requestedTeam) { send(ws, 'teamError', { message: 'Die 1v1-Arena ist nur mit Team-Code spielbar.' }); return; }
       if (requestedTeam) {
         const members = [...clients.values()].filter(c => c.id !== id && c.teamId === requestedTeam && c.status !== 'new');
-        if (members.length >= 4) {
-          send(ws, 'teamError', { message: 'Dieses Team ist bereits voll (maximal 4 Spieler).' });
+        const teamLimit = client.mapIndex === 5 ? 2 : 4;
+        if (members.length >= teamLimit) {
+          send(ws, 'teamError', { message: client.mapIndex === 5 ? 'Die 1v1-Arena erlaubt maximal zwei Spieler pro Team-Code.' : 'Dieses Team ist bereits voll (maximal 4 Spieler).' });
           return;
         }
         client.teamId = requestedTeam;
       } else {
         client.teamId = id; // Ohne Code spielt man in einem eigenen Team.
       }
-      client.mapIndex = Math.max(0, Math.min(5, Math.floor(Number(msg.mapIndex) || 0)));
       if (msg.type === 'join' && (client.status === 'new' || client.status === 'teamLobby')) queueClient(id);
       else if (msg.type === 'teamJoin' && client.status === 'new') client.status = 'teamLobby';
       broadcastTeamRoster(client.teamId);
@@ -250,6 +252,7 @@ wss.on('connection', ws => {
       const wasAlive = !client.lastState || client.lastState.alive !== false;
       client.lastState = state;
       if (wasAlive && !state.alive) {
+        if (currentMatch.duel && client.lastHitBy && client.lastHitBy !== id) { const killer = clients.get(client.lastHitBy); if (killer && killer.matchId === currentMatch.id) send(killer.ws, 'killAward', { killerId: killer.id, victimId: id, points: 1 }); }
         for (const mate of clients.values()) {
           if (mate.id !== id && mate.teamId === client.teamId && mate.matchId === currentMatch.id) {
             send(mate.ws, 'teamMateDead', { id, name: client.name });
