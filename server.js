@@ -157,6 +157,7 @@ function cleanLoot(input) {
 }
 function evaluateWinner() {
   if (!currentMatch || currentMatch.winnerTeamId || currentMatch.aliveBots !== 0) return;
+  if (currentMatch.duel && currentMatch.players.some(id => { const c = clients.get(id); return !c || !c.lastState; })) return;
   const aliveTeams = new Set();
   for (const id of currentMatch.players) {
     const c = clients.get(id);
@@ -276,7 +277,7 @@ wss.on('connection', ws => {
       if (++client.hitCount > 40) return;
       const amount = Math.max(1, Math.min(100, Math.round(Number(msg.amount) || 1)));
       const target = clients.get(targetId);
-      if (target) send(target.ws, 'playerHit', { targetId, fromId: id, fromName: client.name, amount, head: !!msg.head });
+      if (target) { target.lastHitBy = id; send(target.ws, 'playerHit', { targetId, fromId: id, fromName: client.name, amount, head: !!msg.head }); }
       return;
     }
 
