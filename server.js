@@ -89,18 +89,26 @@ function startMatch() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(id);
   }
-  const first = waiting.map(id => clients.get(id)).find(Boolean);
-  const duelQueue = !!(first && first.mapIndex === 5);
+  // 1v1-Paare werden unabhängig von normalen Wartenden erkannt.
+  const duelGroup = [...groups.values()].find(group =>
+    group.length === 2 && group.every(id => clients.get(id)?.mapIndex === 5)
+  );
   const picked = [];
   const pickedSet = new Set();
-  for (const group of groups.values()) {
-    const allDuel = group.length > 0 && group.every(id => clients.get(id)?.mapIndex === 5);
-    if (duelQueue) {
-      if (allDuel && group.length === 2) {
-        picked.push(...group); group.forEach(id => pickedSet.add(id)); break;
+  if (duelGroup) {
+    picked.push(...duelGroup);
+    duelGroup.forEach(id => pickedSet.add(id));
+  } else {
+    // Unvollständige 1v1-Teams blockieren keine normalen Matches.
+    for (const group of groups.values()) {
+      const allNormal = group.length > 0 && group.every(id => {
+        const c = clients.get(id);
+        return c && c.mapIndex >= 0 && c.mapIndex <= 4;
+      });
+      if (allNormal && picked.length + group.length <= MAX_PLAYERS) {
+        picked.push(...group);
+        group.forEach(id => pickedSet.add(id));
       }
-    } else if (!allDuel && picked.length + group.length <= MAX_PLAYERS) {
-      picked.push(...group); group.forEach(id => pickedSet.add(id));
     }
   }
   waiting = waiting.filter(id => !pickedSet.has(id));
@@ -109,7 +117,7 @@ function startMatch() {
     if (waiting.length) scheduleStart();
     return;
   }
-  const isDuel = duelQueue;
+  const isDuel = picked.length === 2 && picked.every(id => clients.get(id)?.mapIndex === 5);
   roundNumber += 1;
   const selectedMaps = [...new Set(picked.map(id => clients.get(id)?.mapIndex).filter(n => Number.isInteger(n) && n >= 0 && n <= 4))];
   const chosenMapIndex = isDuel ? 5 : (selectedMaps.length ? selectedMaps[randomInt(0, selectedMaps.length)] : 0);
