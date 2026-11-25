@@ -100,11 +100,14 @@ function startMatch() {
   waiting = waiting.filter(id => !pickedSet.has(id));
   if (!picked.length) { broadcastLobby(); return; }
   roundNumber += 1;
+  // Eine zufällige Karte aus allen Karten wählen, die die Spieler dieser Runde ausgewählt haben.
+  const selectedMaps = [...new Set(picked.map(id => clients.get(id)?.mapIndex).filter(n => Number.isInteger(n) && n >= 0 && n <= 4))];
+  const chosenMapIndex = selectedMaps.length ? selectedMaps[randomInt(0, selectedMaps.length)] : 0;
   currentMatch = {
     id: randomUUID(),
     round: roundNumber,
     seed: randomInt(1, 0x7fffffff),
-    mapIndex: clients.get(picked[0])?.mapIndex || 0,
+    mapIndex: chosenMapIndex,
     players: picked,
     ended: new Set(),
     openedChests: new Set(),
