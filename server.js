@@ -257,7 +257,10 @@ wss.on('connection', ws => {
       const wasAlive = !client.lastState || client.lastState.alive !== false;
       client.lastState = state;
       if (wasAlive && !state.alive) {
-        if (currentMatch.duel && client.lastHitBy && client.lastHitBy !== id) { const killer = clients.get(client.lastHitBy); if (killer && killer.matchId === currentMatch.id) send(killer.ws, 'killAward', { killerId: killer.id, victimId: id, points: 1 }); }
+        if (client.lastHitBy && client.lastHitBy !== id) {
+          const killer = clients.get(client.lastHitBy);
+          if (killer && killer.matchId === currentMatch.id) send(killer.ws, 'killAward', { killerId: killer.id, victimId: id, points: 1 });
+        }
         for (const mate of clients.values()) {
           if (mate.id !== id && mate.teamId === client.teamId && mate.matchId === currentMatch.id) {
             send(mate.ws, 'teamMateDead', { id, name: client.name });
